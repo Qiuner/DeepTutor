@@ -239,9 +239,10 @@ async function startupManifest() {
   if (!saved) return { manifestFile: seed };
   // A missing or unreadable seed must not stop the installed core from starting.
   const bundled = await readJSON(seed).catch(error => { console.error(error); return null; });
-  const { current, upgrade, seedError } = startupRuntime({
+  const { current, upgrade, seedError, replaceUntrusted } = startupRuntime({
     saved, seed: bundled, transaction: await readJSON(transactionFile), publicKey,
   });
+  if (replaceUntrusted) return { manifestFile: seed, replaceUntrusted: true };
   if (seedError) console.error(seedError);
   const installed = path.join(userRoot, 'runtimes', current.runtimeId, 'installed.json');
   return upgrade ? { manifestFile: seed, previous: current, installed } : { manifestFile: installed };
@@ -255,7 +256,7 @@ async function boot() {
     status({ phase: 'starting', step: 'starting' });
     await stopWorker();
     await recoverInterruptedUpgrade();
-    const { manifestFile, previous, installed } = await startupManifest();
+    const { manifestFile, previous, installed, replaceUntrusted } = await startupManifest();
     try { active = await installBundle(manifestFile, userRoot, publicKey, step => status({ step })); }
     catch (error) {
       if (!previous) throw error;
@@ -264,14 +265,14 @@ async function boot() {
       active = await installBundle(installed, userRoot, publicKey, step => status({ step }));
     }
     if (quitting) return;
-    if (previous && active.manifest.runtimeId !== previous.runtimeId) {
+    if (replaceUntrusted || (previous && active.manifest.runtimeId !== previous.runtimeId)) {
       // The app was installed over an older core: switch to the bundled one with the
       // same backup and rollback as a manual update.
       status({ phase: 'starting', step: 'updating' });
       const backup = await snapshotWorkspace(runtimeHome,
         path.join(userRoot, 'backups', `before-${active.manifest.runtimeId}-${Date.now()}`),
         { warn: logBackupFailure });
-      transaction = { phase: 'testing', previous, candidate: active.manifest, backup };
+      transaction = { phase: 'testing', previous: previous ?? null, candidate: active.manifest, backup };
       await writeJSON(transactionFile, transaction);
     }
     const ready = await launchRuntime(active);
