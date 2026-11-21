@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import http from 'node:http';
+import { Server } from 'node:net';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { localURL, externalURL, validateConfig } from '../src/config.mjs';
 import { canonicalManifest, verifyManifest, installBundle, sha256, newerRuntime, startupRuntime } from '../src/bundles.mjs';
-import { runtimeLayout, systemTar } from '../src/platform.mjs';
+import { runtimeLayout, systemTar, WINDOWS } from '../src/platform.mjs';
 import { ProcessGroup, availablePort, probe, waitReady } from '../src/processes.mjs';
 import { SourceRuntime, stageBundledWeb } from '../src/runtime.mjs';
 
@@ -86,6 +87,25 @@ test('occupied ports are left alone and an available port is chosen', async t =>
   const occupied = server.address().port;
   assert.notEqual(await availablePort(occupied), occupied);
   assert.equal(await probe(`http://127.0.0.1:${occupied}`), true);
+});
+
+test('a reserved Windows port falls back to a system-assigned loopback port', { skip: !WINDOWS }, async t => {
+  const listen = Server.prototype.listen;
+  const preferred = 18801;
+  const attempts = [];
+  t.mock.method(Server.prototype, 'listen', function (port, host, callback) {
+    attempts.push([port, host]);
+    if (port === preferred) {
+      queueMicrotask(() => this.emit('error', Object.assign(new Error('Reserved port'), { code: 'EACCES' })));
+      return this;
+    }
+    return listen.call(this, port, host, callback);
+  });
+
+  const port = await availablePort(preferred);
+  assert.ok(port > 0);
+  assert.notEqual(port, preferred);
+  assert.deepEqual(attempts, [[preferred, '127.0.0.1'], [0, '127.0.0.1']]);
 });
 
 test('a signed bundle installs from and into paths containing spaces and Chinese characters', async t => {

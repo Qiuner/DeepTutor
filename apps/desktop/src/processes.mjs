@@ -83,7 +83,9 @@ export function availablePort(preferred = 0) {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.once('error', error => {
-      if (preferred && error.code === 'EADDRINUSE') availablePort().then(resolve, reject);
+      // Windows reports reserved ports as access denied rather than in use.
+      const unavailable = error.code === 'EADDRINUSE' || (WINDOWS && error.code === 'EACCES');
+      if (preferred && unavailable) availablePort().then(resolve, reject);
       else reject(error);
     });
     server.listen(preferred, '127.0.0.1', () => {
