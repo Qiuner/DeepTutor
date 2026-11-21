@@ -19,6 +19,7 @@ import type {
   BookDepth,
   BookDetail,
   BookProposal,
+  GenerationTiming,
   Page,
   Spine,
   LearningCapture,
@@ -227,14 +228,20 @@ function BookPageInner() {
   }, [])
 
   /** Replace one page in-place, leaving the rest of the book untouched. */
-  const mergePage = useCallback((page: Page) => {
+  const mergePage = useCallback((page: Page, generation?: GenerationTiming | null) => {
     setDetail(current => {
       if (!current || current.book.id !== page.book_id) return current
       const index = current.pages.findIndex(p => p.id === page.id)
       if (index < 0) return current
       const pages = [...current.pages]
       pages[index] = page
-      return { ...current, pages }
+      return {
+        ...current,
+        pages,
+        generation: generation && current.generation
+          ? { ...current.generation, ...generation }
+          : current.generation,
+      }
     })
   }, [])
 
@@ -247,8 +254,8 @@ function BookPageInner() {
     async (pageId: string) => {
       if (!selectedBookId) return
       try {
-        const { page } = await bookApi.getPage(selectedBookId, pageId)
-        mergePage(page)
+        const { page, generation } = await bookApi.getPage(selectedBookId, pageId)
+        mergePage(page, generation)
       } catch (err) {
         console.error('hydratePage failed:', err)
       }

@@ -810,7 +810,16 @@ async def get_page(book_id: str, page_id: str) -> dict[str, Any]:
     page = engine.load_page(book_id, page_id)
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found")
-    return {"page": page.model_dump(mode="json")}
+    book = engine.load_book(book_id)
+    overview = engine.generation_overview(book) if book is not None else None
+    return {
+        "page": page.model_dump(mode="json"),
+        "generation": (
+            {key: overview[key] for key in ("working", "interrupted", "started_at")}
+            if overview is not None
+            else None
+        ),
+    }
 
 
 @router.delete("/books/{book_id}")

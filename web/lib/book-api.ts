@@ -17,6 +17,7 @@ import type {
   Spine,
   Block,
   GenerationSummary,
+  GenerationTiming,
 } from "@/lib/book-types";
 
 const BASE = "/api";
@@ -150,7 +151,7 @@ export const bookApi = {
   getSpine: (book_id: string) =>
     request<{ spine: Spine }>(`/books/${encodeURIComponent(book_id)}/spine`),
   getPage: (book_id: string, page_id: string) =>
-    request<{ page: Page }>(
+    request<{ page: Page; generation?: GenerationTiming | null }>(
       `/books/${encodeURIComponent(book_id)}/pages/${encodeURIComponent(page_id)}`,
     ),
   create: (

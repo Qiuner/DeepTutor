@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   notify: vi.fn(),
+  listen: vi.fn(),
   t: (key: string, values?: Record<string, string>) =>
     key.replace(/{{(\w+)}}/g, (_match, name: string) => values?.[name] ?? ""),
 }));
@@ -54,10 +55,9 @@ vi.mock("@/lib/book-api", () => ({
   },
 }));
 
-vi.mock("@/lib/use-book-stream", () => ({
-  useBookStream: vi.fn(),
-  bookEventKind: () => "",
-  bookEventPageId: () => null,
+vi.mock("@/lib/use-book-stream", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/use-book-stream")>(),
+  useBookStream: fixture.listen,
 }));
 
 vi.mock("@/app/(workspace)/learning/books/components/BookLibrary", () => ({
@@ -73,7 +73,13 @@ vi.mock("@/app/(workspace)/learning/books/components/BookSidebar", () => ({
   default: () => <div data-testid="book-sidebar" />,
 }));
 vi.mock("@/app/(workspace)/learning/books/components/BookGenerationActivity", () => ({
-  default: () => <div data-testid="book-generation" />,
+  default: ({ generation }: { generation?: { started_at?: number; working?: boolean } }) => (
+    <div
+      data-testid="book-generation"
+      data-started-at={generation?.started_at}
+      data-working={generation?.working}
+    />
+  ),
 }));
 vi.mock("@/app/(workspace)/learning/books/components/BookPausedBanner", () => ({
   default: () => null,
@@ -143,6 +149,7 @@ beforeEach(() => {
   });
   fixture.replace.mockReset();
   fixture.notify.mockReset();
+  fixture.listen.mockClear();
 });
 
 describe("book deep-link loading", () => {
@@ -180,6 +187,34 @@ describe("book deep-link loading", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(await screen.findByTestId("page-reader")).toHaveTextContent("page-1");
     expect(screen.queryByTestId("book-library")).not.toBeInTheDocument();
+  });
+
+  it("uses the current chapter clock after a stream event and a reload", async () => {
+    fixture.params = { bookId: "book-1", pageId: "page-1" };
+    const initial = readyDetail();
+    const previous = { started_at: 60, working: false, interrupted: false };
+    const retry = { started_at: 86_460, working: true, interrupted: false };
+    const page = { ...initial.pages[0], status: "generating" };
+    fixture.get.mockResolvedValue({ ...initial, generation: previous });
+    fixture.getPage.mockResolvedValue({ page, generation: retry });
+
+    const view = render(<BookPage />);
+    expect(await screen.findByTestId("book-generation")).toHaveAttribute("data-started-at", "60");
+    await act(async () => {
+      fixture.listen.mock.lastCall?.[1]?.({
+        type: "progress",
+        metadata: { kind: "page_compile_started", page_id: "page-1" },
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("book-generation")).toHaveAttribute("data-started-at", "86460");
+      expect(screen.getByTestId("book-generation")).toHaveAttribute("data-working", "true");
+    });
+
+    view.unmount();
+    fixture.get.mockResolvedValue({ ...initial, pages: [page], generation: retry });
+    render(<BookPage />);
+    expect(await screen.findByTestId("book-generation")).toHaveAttribute("data-started-at", "86460");
   });
 
   it("hides the previous book while a client route opens a different book", async () => {

@@ -286,6 +286,7 @@ class _BookRuntime:
     # ``compile_page`` path and the background worker so they can never race
     # into compiling the same page twice.
     in_flight: dict[str, asyncio.Task[Page]] = field(default_factory=dict)
+    in_flight_started_at: dict[str, float] = field(default_factory=dict)
     worker: asyncio.Task[None] | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     consecutive_page_failures: int = 0
@@ -1019,6 +1020,7 @@ class BookEngine:
                     task.cancel()
                     cancelled.append(task)
             runtime.in_flight.clear()
+            runtime.in_flight_started_at.clear()
             runtime.queued.clear()
             runtime.consecutive_page_failures = 0
             while not runtime.queue.empty():
@@ -1250,6 +1252,7 @@ class BookEngine:
                         )
                     )
                     runtime.in_flight[page_id] = task
+                    runtime.in_flight_started_at[page_id] = time.time()
                     task.add_done_callback(partial(self._release_in_flight, runtime, page_id))
                     break
                 if not force:
@@ -1279,6 +1282,7 @@ class BookEngine:
         """
         if runtime.in_flight.get(page_id) is task:
             runtime.in_flight.pop(page_id, None)
+            runtime.in_flight_started_at.pop(page_id, None)
 
     @workspace_writer
     @_with_book_sources
@@ -1750,6 +1754,25 @@ class BookEngine:
         source_quality = (book.metadata or {}).get("source_quality")
         compiling = book.status == BookStatus.COMPILING
         working = compiling and self.is_worker_live(book.id)
+        started_at = float((book.metadata or {}).get("compile_started_at") or 0.0)
+        runtime = (getattr(self, "_runtimes", None) or {}).get(book.id)
+        if (
+            runtime is not None
+            and book.status != BookStatus.PAUSED
+            and (not compiling or runtime.worker is None or runtime.worker.done())
+        ):
+            # Without a whole-book worker, the clock belongs to the active chapters.
+            chapter_start = min(
+                (
+                    runtime.in_flight_started_at[page_id]
+                    for page_id, task in runtime.in_flight.items()
+                    if not task.done() and page_id in runtime.in_flight_started_at
+                ),
+                default=0.0,
+            )
+            if chapter_start:
+                working = True
+                started_at = chapter_start
         return {
             "status": book.status.value,
             "can_resume": book.status
@@ -1759,9 +1782,7 @@ class BookEngine:
             # Live now, versus "says compiling but nobody is compiling it".
             "working": working,
             "interrupted": compiling and not working,
-            # Epoch seconds this compile run began, so every viewer's clock
-            # agrees and survives a reload. 0 when no run has started.
-            "started_at": float((book.metadata or {}).get("compile_started_at") or 0.0),
+            "started_at": started_at,
         }
 
     def generation_summary(

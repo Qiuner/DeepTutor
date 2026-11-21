@@ -187,6 +187,8 @@ export interface GenerationOverview {
   started_at?: number;
 }
 
+export type GenerationTiming = Pick<GenerationOverview, "working" | "interrupted" | "started_at">;
+
 export interface GenerationSummary extends GenerationOverview {
   book_id: string;
   pages: Record<string, number> & { total: number };

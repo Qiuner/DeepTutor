@@ -7,6 +7,7 @@ outage until every chapter is half-generated.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -112,6 +113,54 @@ async def test_force_waits_for_the_run_in_flight_then_starts_a_fresh_one() -> No
     release.set()
     await asyncio.gather(plain, forced)
     assert calls == [False, True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "has_background_worker", "expected_start"),
+    [
+        (BookStatus.READY, False, 86_460.0),
+        (BookStatus.COMPILING, False, 86_460.0),
+        (BookStatus.COMPILING, True, 60.0),
+    ],
+)
+async def test_chapter_retry_uses_the_active_run_clock(
+    monkeypatch, status: BookStatus, has_background_worker: bool, expected_start: float
+) -> None:
+    engine = _engine()
+    book = Book(id="bk", status=status, metadata={"compile_started_at": 60.0})
+    engine.storage = SimpleNamespace(load_book=lambda _book_id: book)
+    now = 86_460.0
+    monkeypatch.setattr("deeptutor.book.engine.time", SimpleNamespace(time=lambda: now))
+    runtime = await engine._get_or_create_runtime(book.id)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def fake_compile(*, book_id, page_id, stream=None, force=False):
+        started.set()
+        await release.wait()
+        return Page(id=page_id, book_id=book_id, status=PageStatus.READY)
+
+    engine._compile_page_now = fake_compile
+    if has_background_worker:
+        runtime.worker = asyncio.create_task(release.wait())
+    task = asyncio.create_task(engine.compile_page(book_id=book.id, page_id="pg_1", force=True))
+    try:
+        await started.wait()
+        assert engine.generation_overview(book)["started_at"] == expected_start
+        now += 60.0
+        overview = engine.generation_overview(book)
+        assert overview["working"] is True
+        assert overview["started_at"] == expected_start
+        assert book.metadata["compile_started_at"] == 60.0
+    finally:
+        release.set()
+        await task
+        if runtime.worker is not None:
+            await runtime.worker
+
+    assert engine.generation_overview(book)["started_at"] == 60.0
+    assert engine.generation_overview(book)["working"] is False
 
 
 @pytest.mark.asyncio
