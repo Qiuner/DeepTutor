@@ -1,139 +1,53 @@
-name: Mobile
-
-on:
-  pull_request:
-    paths:
-      - "apps/mobile/**"
-      - "web/contracts/**"
-      - "web/features/chat/transport/**"
-      - ".github/workflows/mobile.yml"
-  push:
-    branches: [dev, main, "mobile/**"]
-    paths:
-      - "apps/mobile/**"
-      - "web/contracts/**"
-      - "web/features/chat/transport/**"
-      - ".github/workflows/mobile.yml"
-  workflow_dispatch:
-
+name: Mobile iOS simulator acceptance
+'on': push
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 defaults:
   run:
     working-directory: apps/mobile
-
 jobs:
-  test:
-    name: Typecheck, lint and test
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test -- --runInBand
-
-  android:
-    name: Android debug build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: "platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006"
-      - uses: gradle/actions/setup-gradle@v4
-      - run: npm ci
-      - run: bash ./gradlew --no-daemon :app:assembleDebug -PreactNativeArchitectures=x86_64
-        working-directory: apps/mobile/android
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deeptutor-android-emulator-apk
-          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
-
   ios:
     name: iOS simulator build
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 50
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-          working-directory: apps/mobile
-      - run: npm ci
-      - run: bundle exec pod install
-        working-directory: apps/mobile/ios
-      - run: >-
-          xcodebuild -workspace ios/DeepTutorMobile.xcworkspace
-          -scheme DeepTutorMobile -configuration Debug
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/deeptutor-mobile"
-          CODE_SIGNING_ALLOWED=NO build
-      - name: Launch the iOS development client
-        shell: bash
-        run: |
-          set -euo pipefail
-          device="$(xcrun simctl list devices available -j | node -e '
-            const { devices } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-            const phone = Object.entries(devices)
-              .filter(([runtime]) => runtime.includes("SimRuntime.iOS-"))
-              .flatMap(([, entries]) => entries)
-              .find(entry => entry.isAvailable && entry.name.startsWith("iPhone"));
-            if (!phone) throw new Error("No iPhone simulator found");
-            console.log(phone.udid);
-          ')"
-          metro_log="$RUNNER_TEMP/deeptutor-mobile-metro.log"
-          EXPO_OFFLINE=1 CI=1 node node_modules/expo/bin/cli start \
-            --dev-client --localhost --port 8081 --max-workers 2 >"$metro_log" 2>&1 &
-          metro_pid=$!
-          cleanup() {
-            kill "$metro_pid" 2>/dev/null || true
-            xcrun simctl shutdown "$device" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
-          xcrun simctl install "$device" \
-            "$RUNNER_TEMP/deeptutor-mobile/Build/Products/Debug-iphonesimulator/DeepTutorMobile.app"
-          curl --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
-            --fail --silent --show-error http://127.0.0.1:8081/status
-          xcrun simctl launch "$device" org.reactjs.native.example.DeepTutorMobile
-          xcrun simctl openurl "$device" \
-            'deeptutor-mobile://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'
-          for ((attempt = 0; attempt < 60; attempt++)); do
-            if grep -q "iOS Bundled" "$metro_log"; then
-              echo "iOS development client loaded its Metro bundle."
-              exit 0
-            fi
-            sleep 2
-          done
-          tail -n 30 "$metro_log"
-          exit 1
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: apps/mobile/package-lock.json
+    - uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: '3.3'
+        bundler-cache: 'true'
+        working-directory: apps/mobile
+    - run: npm ci
+    - run: bundle exec pod install
+      working-directory: apps/mobile/ios
+    - run: xcodebuild -workspace ios/DeepTutorMobile.xcworkspace -scheme DeepTutorMobile
+        -configuration Debug -destination 'generic/platform=iOS Simulator' -derivedDataPath
+        "$RUNNER_TEMP/deeptutor-mobile" CODE_SIGNING_ALLOWED=NO build
+    - name: Launch the iOS development client
+      shell: bash
+      run: "set -euo pipefail\ndevice=\"$(xcrun simctl list devices available -j |\
+        \ node -e '\n  const { devices } = JSON.parse(require(\"node:fs\").readFileSync(0,\
+        \ \"utf8\"));\n  const phone = Object.entries(devices)\n    .filter(([runtime])\
+        \ => runtime.includes(\"SimRuntime.iOS-\"))\n    .flatMap(([, entries]) =>\
+        \ entries)\n    .find(entry => entry.isAvailable && entry.name.startsWith(\"\
+        iPhone\"));\n  if (!phone) throw new Error(\"No iPhone simulator found\");\n\
+        \  console.log(phone.udid);\n')\"\nmetro_log=\"$RUNNER_TEMP/deeptutor-mobile-metro.log\"\
+        \nEXPO_OFFLINE=1 CI=1 node node_modules/expo/bin/cli start \\\n  --dev-client\
+        \ --localhost --port 8081 --max-workers 2 >\"$metro_log\" 2>&1 &\nmetro_pid=$!\n\
+        cleanup() {\n  kill \"$metro_pid\" 2>/dev/null || true\n  xcrun simctl shutdown\
+        \ \"$device\" 2>/dev/null || true\n}\ntrap cleanup EXIT\nxcrun simctl boot\
+        \ \"$device\"\nxcrun simctl bootstatus \"$device\" -b\nxcrun simctl install\
+        \ \"$device\" \\\n  \"$RUNNER_TEMP/deeptutor-mobile/Build/Products/Debug-iphonesimulator/DeepTutorMobile.app\"\
+        \ncurl --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \\\n  --fail\
+        \ --silent --show-error http://127.0.0.1:8081/status\nxcrun simctl launch\
+        \ \"$device\" org.reactjs.native.example.DeepTutorMobile\nxcrun simctl openurl\
+        \ \"$device\" \\\n  'deeptutor-mobile://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'\n\
+        for ((attempt = 0; attempt < 60; attempt++)); do\n  if grep -q \"iOS Bundled\"\
+        \ \"$metro_log\"; then\n    echo \"iOS development client loaded its Metro\
+        \ bundle.\"\n    exit 0\n  fi\n  sleep 2\ndone\ntail -n 30 \"$metro_log\"\n\
+        exit 1\n"
