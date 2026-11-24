@@ -1,5 +1,5 @@
 const http = require('node:http');
-const { WebSocketServer } = require('ws');
+const { Server: WebSocketServer } = require('ws');
 const token = 'native_smoke=ok';
 const authenticated = request => request.headers.cookie?.includes(token);
 const server = http.createServer((request, response) => {
