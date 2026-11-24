@@ -1,8 +1,5 @@
 appId: com.deeptutormobile
 ---
-- launchApp:
-    clearState: true
-- openLink: "deeptutor-mobile://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"
 - extendedWaitUntil:
     visible: "DeepTutor"
     timeout: 90000
@@ -15,6 +12,10 @@ appId: com.deeptutormobile
 - extendedWaitUntil:
     visible: "Server address"
     timeout: 45000
+- tapOn: "http://10.0.2.2:18001"
+- eraseText: 32
+- inputText: "http://127.0.0.1:18001"
+- hideKeyboard
 - tapOn: "(?i)^connect$"
 - tapOn: "Username"
 - inputText: "nativefixture"

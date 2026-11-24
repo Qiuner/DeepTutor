@@ -44,3 +44,8 @@ jobs:
           arch: x86_64
           profile: pixel_6
           script: bash apps/mobile/scripts/native-smoke-run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-smoke-results
+          path: ${{ runner.temp }}/native-smoke-results
