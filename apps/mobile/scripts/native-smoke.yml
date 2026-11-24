@@ -1,0 +1,42 @@
+appId: com.deeptutormobile
+---
+- launchApp:
+    clearState: true
+- openLink: "deeptutor-mobile://expo-development-client/?url=http%3A%2F%2F10.0.2.2%3A8081"
+- extendedWaitUntil:
+    visible: "DeepTutor"
+    timeout: 90000
+- tapOn:
+    text: "Continue"
+    optional: true
+- tapOn:
+    text: "Close"
+    optional: true
+- extendedWaitUntil:
+    visible: "Server address"
+    timeout: 45000
+- tapOn: "(?i)^connect$"
+- tapOn: "Username"
+- inputText: "nativefixture"
+- tapOn: "Password"
+- inputText: "wrongpassword"
+- hideKeyboard
+- tapOn: "(?i)^sign in$"
+- assertVisible: "Check your username and password."
+- tapOn: "Password"
+- inputText: "correctpassword"
+- hideKeyboard
+- tapOn: "(?i)^sign in$"
+- assertVisible: "Connected"
+- tapOn: "Message"
+- inputText: "First turn"
+- hideKeyboard
+- tapOn: "(?i)^send$"
+- assertVisible: "^First reply streamed correctly[.]$"
+- tapOn: "Message"
+- inputText: "Second turn"
+- hideKeyboard
+- tapOn: "(?i)^send$"
+- extendedWaitUntil:
+    visible: "^Second reply resumed correctly[.]$"
+    timeout: 25000

@@ -1,52 +1,12 @@
-name: Mobile
-
-on:
-  pull_request:
-    paths:
-      - "apps/mobile/**"
-      - "web/contracts/**"
-      - "web/features/chat/transport/**"
-      - ".github/workflows/mobile.yml"
-  push:
-    branches: [dev, main, "mobile/**"]
-    paths:
-      - "apps/mobile/**"
-      - "web/contracts/**"
-      - "web/features/chat/transport/**"
-      - ".github/workflows/mobile.yml"
-  workflow_dispatch:
-
+name: Android native acceptance
+on: push
 permissions:
   contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
-defaults:
-  run:
-    working-directory: apps/mobile
-
+  actions: read
 jobs:
-  test:
-    name: Typecheck, lint and test
+  smoke:
     runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test -- --runInBand
-
-  android:
-    name: Android debug build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,80 +20,27 @@ jobs:
           java-version: "17"
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-36 build-tools;36.0.0 ndk;27.1.12297006"
-      - uses: gradle/actions/setup-gradle@v4
-      - run: npm ci
-      - run: bash ./gradlew --no-daemon :app:assembleDebug -PreactNativeArchitectures=x86_64
-        working-directory: apps/mobile/android
-      - uses: actions/upload-artifact@v4
+          packages: "platform-tools"
+      - uses: actions/download-artifact@v4
         with:
+          github-token: ${{ github.token }}
+          run-id: 45437278415
           name: deeptutor-android-emulator-apk
-          path: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 7
-
-  ios:
-    name: iOS simulator build
-    runs-on: macos-26
-    timeout-minutes: 50
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: "3.3"
-          bundler-cache: true
-          working-directory: apps/mobile
+          path: ${{ runner.temp }}/deeptutor-apk
       - run: npm ci
-      - run: bundle exec pod install
-        working-directory: apps/mobile/ios
-      - run: >-
-          xcodebuild -workspace ios/DeepTutorMobile.xcworkspace
-          -scheme DeepTutorMobile -configuration Debug
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath "$RUNNER_TEMP/deeptutor-mobile"
-          CODE_SIGNING_ALLOWED=NO build
-      - name: Launch the iOS development client
-        shell: bash
+        working-directory: apps/mobile
+      - name: Install Maestro and enable KVM
         run: |
-          set -euo pipefail
-          device="$(xcrun simctl list devices available -j | node -e '
-            const { devices } = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
-            const phone = Object.entries(devices)
-              .filter(([runtime]) => runtime.includes("SimRuntime.iOS-"))
-              .flatMap(([, entries]) => entries)
-              .find(entry => entry.isAvailable && entry.name.startsWith("iPhone"));
-            if (!phone) throw new Error("No iPhone simulator found");
-            console.log(phone.udid);
-          ')"
-          metro_log="$RUNNER_TEMP/deeptutor-mobile-metro.log"
-          EXPO_OFFLINE=1 CI=1 node node_modules/expo/bin/cli start \
-            --dev-client --localhost --port 8081 --max-workers 2 >"$metro_log" 2>&1 &
-          metro_pid=$!
-          cleanup() {
-            kill "$metro_pid" 2>/dev/null || true
-            xcrun simctl shutdown "$device" 2>/dev/null || true
-          }
-          trap cleanup EXIT
-          xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
-          xcrun simctl install "$device" \
-            "$RUNNER_TEMP/deeptutor-mobile/Build/Products/Debug-iphonesimulator/DeepTutorMobile.app"
-          curl --retry 20 --retry-connrefused --retry-delay 1 --max-time 5 \
-            --fail --silent --show-error http://127.0.0.1:8081/status
-          xcrun simctl launch "$device" org.reactjs.native.example.DeepTutorMobile
-          xcrun simctl openurl "$device" \
-            'deeptutor-mobile://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'
-          for ((attempt = 0; attempt < 60; attempt++)); do
-            if grep -q "iOS Bundled" "$metro_log"; then
-              echo "iOS development client loaded its Metro bundle."
-              exit 0
-            fi
-            sleep 2
-          done
-          tail -n 30 "$metro_log"
-          exit 1
+          curl -fLsS https://github.com/mobile-dev-inc/maestro/releases/download/cli-2.12.1/maestro.zip -o "$RUNNER_TEMP/maestro.zip"
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          script: bash apps/mobile/scripts/native-smoke-run.sh
