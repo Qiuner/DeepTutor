@@ -23,6 +23,7 @@ cleanup() {
   xcrun simctl shutdown "$device" 2>/dev/null || true
 }
 trap cleanup EXIT
+echo "Booting simulator $device"
 xcrun simctl boot "$device"
 ditto -x -k "$work/deeptutor-ios-simulator.zip" "$work"
 
@@ -45,7 +46,13 @@ curl --fail --silent --show-error --retry 10 --retry-connrefused \
 xcrun simctl bootstatus "$device" -b
 xcrun simctl keychain "$device" add-root-cert "$work/ca.pem"
 xcrun simctl install "$device" "$work/DeepTutorMobile.app"
-maestro --device "$device" test --debug-output "$results" --format junit \
-  --output "$results/maestro.xml" ../../.github/validation/ios-acceptance/flow.yml
+test_src="$GITHUB_WORKSPACE/.github/validation/ios-acceptance/xctest"
+cp -R "$test_src" "$work/xctest"
+cd "$work/xctest"
+xcodegen generate
+xcodebuild -project NativeAcceptance.xcodeproj -scheme NativeAcceptance \
+  -destination "id=$device" -parallel-testing-enabled NO \
+  -derivedDataPath "$work/derived" -resultBundlePath "$results/Acceptance.xcresult" \
+  CODE_SIGNING_ALLOWED=NO test
 grep -q 'second turn resumed after sequence 1' "$results/fixture.log"
 echo 'iOS native acceptance passed.'

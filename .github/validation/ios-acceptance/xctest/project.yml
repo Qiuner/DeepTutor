@@ -1,0 +1,35 @@
+name: NativeAcceptance
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    GENERATE_INFOPLIST_FILE: YES
+    SWIFT_VERSION: "5.0"
+targets:
+  TestHost:
+    type: application
+    platform: iOS
+    sources: [Host]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.deeptutor.acceptance.host
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+  NativeAcceptanceTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    dependencies:
+      - target: TestHost
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.deeptutor.acceptance.tests
+        TEST_TARGET_NAME: TestHost
+schemes:
+  NativeAcceptance:
+    build:
+      targets:
+        TestHost: all
+        NativeAcceptanceTests: [test]
+    test:
+      targets: [NativeAcceptanceTests]
