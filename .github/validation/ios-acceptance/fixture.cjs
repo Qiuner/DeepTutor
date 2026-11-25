@@ -20,7 +20,7 @@ const server = https.createServer({
   request.on('end', () => {
     const { username, password } = JSON.parse(data);
     const accepted = username === 'nativefixture' && password === 'correctpassword';
-    console.log(accepted ? 'accepted fixture login' : 'rejected fixture login');
+    console.log(JSON.stringify({ loginAccepted: accepted, usernameMatchesFixture: username === 'nativefixture', passwordLength: typeof password === 'string' ? password.length : null }));
     response.writeHead(accepted ? 200 : 401, accepted ? { 'Set-Cookie': token + '; Path=/; HttpOnly; Secure' } : {});
     response.end();
   });
