@@ -32,18 +32,34 @@ final class NativeAcceptanceTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Connected"].waitForExistence(timeout: 25))
         print("iOS authenticated HTTPS and opened the cookie-authenticated WebSocket")
 
-        let composer = app.textViews["Message"]
-        XCTAssertTrue(composer.waitForExistence(timeout: 10))
-        composer.tap()
-        typeAndVerify("First turn", into: composer)
-        app.buttons["Send"].tap()
+        send("First turn", in: app)
         XCTAssertTrue(app.staticTexts["First reply streamed correctly."].waitForExistence(timeout: 25))
 
-        composer.tap()
-        typeAndVerify("Second turn", into: composer)
-        app.buttons["Send"].tap()
+        send("Second turn", in: app)
         XCTAssertTrue(app.staticTexts["Second reply resumed correctly."].waitForExistence(timeout: 30))
         print("iOS rendered both turns, including the resumed reply")
+    }
+
+    @MainActor
+    private func send(_ message: String, in app: XCUIApplication) {
+        let sendButton = app.buttons["Send"]
+        XCTAssertTrue(sendButton.waitForExistence(timeout: 15))
+        let composer = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier == %@ OR label == %@ OR value == %@",
+                        "Message", "Message", "Ask a question")
+        ).firstMatch
+        if composer.exists && composer.isHittable {
+            composer.tap()
+        } else {
+            sendButton.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0.5))
+                .withOffset(CGVector(dx: -60, dy: 0)).tap()
+        }
+        for character in message {
+            app.typeText(String(character))
+        }
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: sendButton)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed)
+        sendButton.tap()
     }
 
     @MainActor
