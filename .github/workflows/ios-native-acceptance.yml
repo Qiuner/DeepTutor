@@ -1,0 +1,91 @@
+name: iOS native acceptance
+on:
+  push:
+    branches: [mobile/verify-ios-e2e-2915]
+    paths: [.github/workflows/ios-native-acceptance.yml, .github/validation/ios-acceptance/**]
+permissions:
+  contents: read
+jobs:
+  build:
+    name: Build bundled iOS app
+    runs-on: macos-26-intel
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: apps/mobile
+      - run: npm ci
+      - run: bundle exec pod install
+        working-directory: apps/mobile/ios
+      - env:
+          EXPO_OFFLINE: "1"
+        run: >-
+          xcodebuild -workspace ios/DeepTutorMobile.xcworkspace
+          -scheme DeepTutorMobile -configuration Release
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "$RUNNER_TEMP/deeptutor-mobile"
+          ARCHS="$(uname -m)" CODE_SIGNING_ALLOWED=NO build
+      - name: Package simulator app
+        run: |
+          app="$RUNNER_TEMP/deeptutor-mobile/Build/Products/Release-iphonesimulator/DeepTutorMobile.app"
+          test -s "$app/main.jsbundle"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/deeptutor-ios-simulator.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deeptutor-ios-simulator-app
+          path: ${{ runner.temp }}/deeptutor-ios-simulator.zip
+          if-no-files-found: error
+          retention-days: 7
+  acceptance:
+    name: Login, streaming and reconnect on iOS
+    needs: build
+    runs-on: macos-26-intel
+    timeout-minutes: 36
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/download-artifact@v4
+        with:
+          name: deeptutor-ios-simulator-app
+          path: ${{ runner.temp }}/ios-acceptance
+      - run: npm ci
+      - name: Install Maestro
+        run: |
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/mobile-dev-inc/maestro/releases/download/cli-2.12.1/maestro.zip \
+            -o "$RUNNER_TEMP/maestro.zip"
+          unzip -q "$RUNNER_TEMP/maestro.zip" -d "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/maestro/bin" >> "$GITHUB_PATH"
+      - name: Exercise the iOS app
+        env:
+          MAESTRO_CLI_NO_ANALYTICS: "1"
+        run: bash ../../.github/validation/ios-acceptance/run.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deeptutor-ios-acceptance-results
+          path: ${{ runner.temp }}/ios-acceptance-results
+          if-no-files-found: ignore
+          retention-days: 7
